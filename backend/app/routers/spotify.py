@@ -108,4 +108,4 @@ async def roast_spotify(request: Request) -> RoastResult:
         raise HTTPException(status_code=401, detail="Spotify session expired, reconnect") from exc
 
     handle = profile.get("display_name") or profile.get("id", "mystery listener")
-    return build_spotify_roast(handle, top_artists)
+    return await build_spotify_roast(handle, top_artists)

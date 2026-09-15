@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { generateRoast, type Platform } from '../data/mockRoast'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { generateRoast, type Platform, type RoastResult } from '../data/mockRoast'
+import { API_BASE_URL } from '../lib/api'
 
 const MESSAGES = [
   'dialing up the algorithm...',
@@ -12,15 +13,23 @@ const MESSAGES = [
   'sharpening the roast...',
 ]
 
+async function fetchSpotifyRoast(): Promise<RoastResult> {
+  const response = await fetch(`${API_BASE_URL}/roast/spotify`, { credentials: 'include' })
+  if (!response.ok) throw new Error('spotify roast fetch failed')
+  return response.json()
+}
+
 export default function Loading() {
   const { platform } = useParams<{ platform: Platform }>()
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const handle = (location.state as { handle?: string } | null)?.handle
+  const isOAuthReturn = platform === 'spotify' && searchParams.get('oauth') === 'success'
   const [messageIndex, setMessageIndex] = useState(0)
 
   useEffect(() => {
-    if (!platform || !handle) {
+    if (!platform || (!handle && !isOAuthReturn)) {
       navigate('/', { replace: true })
       return
     }
@@ -29,16 +38,24 @@ export default function Loading() {
       setMessageIndex((i) => (i + 1) % MESSAGES.length)
     }, 500)
 
-    const timeout = setTimeout(() => {
-      const result = generateRoast(platform, handle)
-      navigate('/results', { replace: true, state: { platform, result } })
-    }, 2600)
+    const minDelay = new Promise((resolve) => setTimeout(resolve, 2600))
+
+    const work = isOAuthReturn
+      ? fetchSpotifyRoast()
+      : Promise.resolve(generateRoast(platform, handle as string))
+
+    Promise.all([work, minDelay])
+      .then(([result]) => {
+        navigate('/results', { replace: true, state: { platform, result } })
+      })
+      .catch(() => {
+        navigate(`/connect/${platform}?oauth=error`, { replace: true })
+      })
 
     return () => {
       clearInterval(interval)
-      clearTimeout(timeout)
     }
-  }, [platform, handle, navigate])
+  }, [platform, handle, isOAuthReturn, navigate])
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-8 px-4 text-center">

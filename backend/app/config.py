@@ -16,6 +16,13 @@ class Settings(BaseSettings):
 
     groq_api_key: str = ""
 
+    # False for local http dev, True in production (https, cross-site cookies)
+    cookie_secure: bool = False
+
+    @property
+    def cookie_samesite(self) -> str:
+        return "none" if self.cookie_secure else "lax"
+
     @property
     def frontend_origins(self) -> list[str]:
         return [origin.strip() for origin in self.frontend_origin.split(",") if origin.strip()]

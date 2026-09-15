@@ -1,3 +1,4 @@
+import secrets
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -6,12 +7,22 @@ from fastapi.responses import RedirectResponse
 from app.config import get_settings
 from app.limiter import limiter
 from app.models import RoastResult
-from app.services.stub_roast import stub_spotify_roast
+from app.services.spotify_client import (
+    SpotifyAuthError,
+    exchange_code_for_tokens,
+    fetch_profile,
+    fetch_top_artists,
+)
+from app.services.spotify_roast import build_spotify_roast
 
 router = APIRouter(tags=["spotify"])
 
 SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_SCOPES = "user-top-read user-read-recently-played"
+
+STATE_COOKIE = "sp_oauth_state"
+ACCESS_COOKIE = "sp_at"
+REFRESH_COOKIE = "sp_rt"
 
 
 @router.get("/auth/spotify/login")
@@ -21,32 +32,80 @@ def spotify_login(request: Request) -> RedirectResponse:
     if not settings.spotify_client_id:
         raise HTTPException(status_code=501, detail="Spotify OAuth is not configured yet")
 
+    state = secrets.token_urlsafe(16)
     params = {
         "client_id": settings.spotify_client_id,
         "response_type": "code",
         "redirect_uri": settings.spotify_redirect_uri,
         "scope": SPOTIFY_SCOPES,
+        "state": state,
     }
-    return RedirectResponse(f"{SPOTIFY_AUTHORIZE_URL}?{urlencode(params)}")
+    response = RedirectResponse(f"{SPOTIFY_AUTHORIZE_URL}?{urlencode(params)}")
+    response.set_cookie(
+        STATE_COOKIE,
+        state,
+        max_age=600,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )
+    return response
 
 
 @router.get("/auth/spotify/callback")
 @limiter.limit("15/minute")
-def spotify_callback(request: Request, code: str | None = Query(default=None), error: str | None = Query(default=None)):
-    # TODO: exchange `code` for an access/refresh token pair and hand the
-    # user off to /roast/spotify with a real session. Landing in the batch
-    # that wires up Spotify OAuth + stats fetching.
-    raise HTTPException(status_code=501, detail="Spotify OAuth token exchange is not implemented yet")
+async def spotify_callback(
+    request: Request,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    settings = get_settings()
+    frontend = settings.frontend_origins[0] if settings.frontend_origins else "/"
+    expected_state = request.cookies.get(STATE_COOKIE)
+
+    if error or not code or not state or state != expected_state:
+        return RedirectResponse(f"{frontend}/connect/spotify?oauth=error")
+
+    try:
+        tokens = await exchange_code_for_tokens(code)
+    except SpotifyAuthError:
+        return RedirectResponse(f"{frontend}/connect/spotify?oauth=error")
+
+    response = RedirectResponse(f"{frontend}/loading/spotify?oauth=success")
+    response.delete_cookie(STATE_COOKIE)
+    response.set_cookie(
+        ACCESS_COOKIE,
+        tokens["access_token"],
+        max_age=tokens.get("expires_in", 3600),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )
+    if tokens.get("refresh_token"):
+        response.set_cookie(
+            REFRESH_COOKIE,
+            tokens["refresh_token"],
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            secure=settings.cookie_secure,
+            samesite=settings.cookie_samesite,
+        )
+    return response
 
 
 @router.get("/roast/spotify", response_model=RoastResult)
 @limiter.limit("15/minute")
-def roast_spotify(request: Request, handle: str = Query(..., min_length=1, max_length=64)) -> RoastResult:
-    handle = handle.strip()
-    if not handle:
-        raise HTTPException(status_code=400, detail="handle is required")
+async def roast_spotify(request: Request) -> RoastResult:
+    access_token = request.cookies.get(ACCESS_COOKIE)
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not connected to Spotify")
 
-    # TODO: use the authenticated user's access token to fetch top
-    # tracks/artists/recently-played and hand the stats to the Groq roast
-    # generator instead of this placeholder.
-    return stub_spotify_roast(handle)
+    try:
+        profile = await fetch_profile(access_token)
+        top_artists = await fetch_top_artists(access_token)
+    except SpotifyAuthError as exc:
+        raise HTTPException(status_code=401, detail="Spotify session expired, reconnect") from exc
+
+    handle = profile.get("display_name") or profile.get("id", "mystery listener")
+    return build_spotify_roast(handle, top_artists)

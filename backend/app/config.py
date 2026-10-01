@@ -11,11 +11,18 @@ class Settings(BaseSettings):
     # correctly whether uvicorn is launched from backend/ or elsewhere.
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
-    frontend_origin: str = "http://localhost:5173"
+    # Must be 127.0.0.1, not localhost, to match spotify_redirect_uri below —
+    # otherwise the browser treats them as different sites and drops the
+    # OAuth session cookie on the frontend's fetch() calls to this API.
+    frontend_origin: str = "http://127.0.0.1:5173"
 
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
-    spotify_redirect_uri: str = "http://localhost:8000/auth/spotify/callback"
+    # Spotify requires the IP literal 127.0.0.1 for loopback redirect URIs —
+    # "localhost" is rejected (enforced for all apps since November 2025).
+    # The frontend's API_BASE_URL must use the same host, since the OAuth
+    # callback's session cookies are set on whichever host this URI uses.
+    spotify_redirect_uri: str = "http://127.0.0.1:8000/auth/spotify/callback"
 
     steam_api_key: str = ""
 

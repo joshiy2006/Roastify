@@ -1,8 +1,11 @@
+import logging
 import secrets
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+
+logger = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.limiter import limiter
@@ -65,18 +68,21 @@ async def spotify_callback(
     expected_state = request.cookies.get(STATE_COOKIE)
 
     if error or not code or not state or state != expected_state:
+        logger.warning("Spotify callback rejected: error=%s state_match=%s", error, state == expected_state)
         return RedirectResponse(f"{frontend}/connect/spotify?oauth=error")
 
     try:
         tokens = await exchange_code_for_tokens(code)
-    except SpotifyAuthError:
+        access_token = tokens["access_token"]
+    except (SpotifyAuthError, KeyError):
+        logger.exception("Spotify token exchange failed")
         return RedirectResponse(f"{frontend}/connect/spotify?oauth=error")
 
     response = RedirectResponse(f"{frontend}/loading/spotify?oauth=success")
     response.delete_cookie(STATE_COOKIE)
     response.set_cookie(
         ACCESS_COOKIE,
-        tokens["access_token"],
+        access_token,
         max_age=tokens.get("expires_in", 3600),
         httponly=True,
         secure=settings.cookie_secure,

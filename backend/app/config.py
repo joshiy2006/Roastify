@@ -1,10 +1,15 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Resolved relative to this file (not the process's CWD) so `.env` loads
+    # correctly whether uvicorn is launched from backend/ or elsewhere.
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     frontend_origin: str = "http://localhost:5173"
 

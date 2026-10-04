@@ -42,6 +42,12 @@ def spotify_login(request: Request) -> RedirectResponse:
         "redirect_uri": settings.spotify_redirect_uri,
         "scope": SPOTIFY_SCOPES,
         "state": state,
+        # Force Spotify's account-picker/consent screen every time, even for
+        # an account that already authorized this app — otherwise a repeat
+        # login silently re-approves and redirects straight back, which
+        # looks like "the button doesn't do anything" when it's actually
+        # working as designed.
+        "show_dialog": "true",
     }
     response = RedirectResponse(f"{SPOTIFY_AUTHORIZE_URL}?{urlencode(params)}")
     response.set_cookie(
@@ -112,7 +118,8 @@ async def roast_spotify(request: Request) -> RoastResult:
         top_artists = await fetch_top_artists(access_token)
     except SpotifyAuthError as exc:
         logger.warning("Spotify API call failed for an authenticated session: %s", exc)
-        if "403" in str(exc):
+        exc_text = str(exc).lower()
+        if "403" in exc_text or "not registered" in exc_text or "premium" in exc_text:
             raise HTTPException(
                 status_code=403,
                 detail=(

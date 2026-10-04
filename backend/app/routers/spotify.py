@@ -5,8 +5,6 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
-logger = logging.getLogger(__name__)
-
 from app.config import get_settings
 from app.limiter import limiter
 from app.models import RoastResult
@@ -17,6 +15,8 @@ from app.services.spotify_client import (
     fetch_top_artists,
 )
 from app.services.spotify_roast import build_spotify_roast
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["spotify"])
 
@@ -111,6 +111,18 @@ async def roast_spotify(request: Request) -> RoastResult:
         profile = await fetch_profile(access_token)
         top_artists = await fetch_top_artists(access_token)
     except SpotifyAuthError as exc:
+        logger.warning("Spotify API call failed for an authenticated session: %s", exc)
+        if "403" in str(exc):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Spotify rejected this account. If the app is in Development Mode "
+                    "(the default for new apps), only up to 5 Spotify accounts explicitly "
+                    "added under Settings -> User Management in the Spotify Developer "
+                    "Dashboard can use it, and the app owner's account needs an active "
+                    "Premium subscription."
+                ),
+            ) from exc
         raise HTTPException(status_code=401, detail="Spotify session expired, reconnect") from exc
 
     handle = profile.get("display_name") or profile.get("id", "mystery listener")

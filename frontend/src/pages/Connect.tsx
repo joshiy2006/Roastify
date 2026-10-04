@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Marquee from '../components/Marquee'
 import type { Platform } from '../data/mockRoast'
 import { API_BASE_URL } from '../lib/api'
@@ -21,10 +21,12 @@ const COPY: Record<Platform, { emoji: string; title: string; gradient: string }>
 export default function Connect() {
   const { platform } = useParams<{ platform: Platform }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const [handle, setHandle] = useState('')
   const copy = platform === 'spotify' || platform === 'steam' ? COPY[platform] : null
   const oauthError = searchParams.get('oauth') === 'error'
+  const errorDetail = (location.state as { errorDetail?: string } | null)?.errorDetail
 
   if (!copy || !platform) {
     return (
@@ -60,8 +62,8 @@ export default function Connect() {
         <h1 className="font-display text-holo text-3xl leading-tight sm:text-5xl">{copy.title}</h1>
 
         {oauthError && (
-          <p className="font-pixel rounded-xl border-2 border-inkblack bg-hotpink/90 px-4 py-2 text-[10px] text-white">
-            couldn't connect to Spotify — try again?
+          <p className="font-body max-w-sm rounded-xl border-2 border-inkblack bg-hotpink/90 px-4 py-3 text-xs leading-relaxed text-white sm:text-sm">
+            {errorDetail || "couldn't connect to Spotify — try again?"}
           </p>
         )}
 

@@ -15,7 +15,10 @@ const MESSAGES = [
 
 async function fetchSpotifyRoast(): Promise<RoastResult> {
   const response = await fetch(`${API_BASE_URL}/roast/spotify`, { credentials: 'include' })
-  if (!response.ok) throw new Error('spotify roast fetch failed')
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(body?.detail || 'Could not reach Spotify. Try reconnecting.')
+  }
   return response.json()
 }
 
@@ -48,8 +51,9 @@ export default function Loading() {
       .then(([result]) => {
         navigate('/results', { replace: true, state: { platform, result } })
       })
-      .catch(() => {
-        navigate(`/connect/${platform}?oauth=error`, { replace: true })
+      .catch((err: unknown) => {
+        const errorDetail = err instanceof Error ? err.message : undefined
+        navigate(`/connect/${platform}?oauth=error`, { replace: true, state: { errorDetail } })
       })
 
     return () => {
